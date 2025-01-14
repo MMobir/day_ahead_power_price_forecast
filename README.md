@@ -21,9 +21,11 @@ This project predicts day-ahead electricity prices for various European bidding 
     ├── data_preparation/
     │   ├── fetch_historical_data.py  # Fetches data from ENTSO-E
     │   └── preprocess_data.py        # Prepares data for training
-    └── model/
-        ├── lstm_model.py       # LSTM model definition and training
-        └── predict.py          # Model evaluation and predictions
+    ├── model/
+    │   ├── lstm_model.py       # LSTM model definition and training
+    │   └── predict.py          # Model evaluation and predictions
+    └── dashboard/
+        └── app.py             # Interactive Streamlit dashboard
 ```
 
 ## Features
@@ -36,7 +38,11 @@ This project predicts day-ahead electricity prices for various European bidding 
   - Time-based feature engineering
   - Sequence-based prediction (24-hour lookback)
 - Model evaluation with multiple metrics (MAE, RMSE, MAPE, R²)
-- Visualization of predictions
+- Interactive Streamlit dashboard with:
+  - Real-time price forecasts visualization
+  - Error analysis and distribution plots
+  - Country-wise performance metrics
+  - Date range selection
 
 ## Requirements
 
@@ -91,6 +97,11 @@ This project predicts day-ahead electricity prices for various European bidding 
 4. Make predictions and evaluate:
    ```bash
    python src/model/predict.py
+   ```
+
+5. Launch the dashboard:
+   ```bash
+   streamlit run src/dashboard/app.py
    ```
 
 ## Model Architecture

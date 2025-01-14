@@ -122,6 +122,16 @@ class PricePredictor:
                 self.results_dir / f'metrics_{country_code}.csv'
             )
             
+            # Save predictions and actual values
+            predictions_df = pd.DataFrame({
+                'timestamp': dates,
+                'actual': y_true,
+                'predicted': y_pred.flatten()
+            })
+            predictions_df.set_index('timestamp', inplace=True)
+            predictions_df.to_csv(self.results_dir / f'predictions_{country_code}.csv')
+            logger.info(f"Saved predictions to {self.results_dir}/predictions_{country_code}.csv")
+            
             # Plot results
             self.plot_predictions(y_true, y_pred, dates, country_code)
             
