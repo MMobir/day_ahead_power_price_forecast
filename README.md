@@ -128,4 +128,18 @@ Results are saved in the `results/` directory:
 
 ## Contributing
 
-[Add contribution guidelines here] 
+We welcome contributions to improve this project! Here's how you can contribute:
+
+1. Fork the repository
+2. Create a new branch for your feature/fix
+3. Make your changes and test thoroughly
+4. Submit a pull request with a clear description of changes
+
+For major changes or new features, please open an issue first to discuss what you would like to change.
+
+Please make sure to update tests and documentation as appropriate.
+
+For questions or collaboration opportunities, feel free to reach out:
+- Email: mahmoudmobir@gmail.com
+
+We aim to review all pull requests within 1-2 weeks. Thank you for helping improve this project!
