@@ -211,6 +211,37 @@ def get_market_status():
     
     return f"{hours:02d}:{minutes:02d}"
 
+def group_zones_by_region(active_zones):
+    """Group bidding zones by region"""
+    regions = {
+        'Central Western Europe': ['DE_LU', 'FR', 'NL', 'BE', 'AT', 'CH'],
+        'Nordics': ['DK_1', 'DK_2', 'NO_1', 'NO_2', 'NO_3', 'NO_4', 'NO_5', 'SE_1', 'SE_4', 'FI'],
+        'Baltics': ['EE', 'LV', 'LT'],
+        'Central Eastern Europe': ['CZ', 'HU', 'PL', 'RO', 'SI', 'HR'],
+        'Southern Europe': ['IT_CALA', 'IT_CNOR', 'IT_CSUD', 'IT_NORD', 'IT_SARD', 'IT_SICI', 'IT_SUD', 'GR', 'ES', 'PT'],
+        'South Eastern Europe': ['BG', 'RS', 'ME']
+    }
+    
+    # Create a mapping of zones to their display names
+    zone_display = {
+        row['short_code']: f"{row['name']} ({row['short_code']})"
+        for _, row in active_zones.iterrows()
+    }
+    
+    # Group active zones by region
+    grouped_zones = {}
+    for region, codes in regions.items():
+        # Filter for active zones in this region
+        region_zones = {
+            zone_display[code]: code
+            for code in codes
+            if code in zone_display
+        }
+        if region_zones:  # Only add region if it has active zones
+            grouped_zones[region] = region_zones
+    
+    return grouped_zones
+
 def main():
     # Initialize session state
     initialize_session_state()
@@ -226,21 +257,23 @@ def main():
     # Sidebar
     st.sidebar.header("Market Selection")
     
-    # Create a mapping of display names to codes
-    zone_mapping = dict(zip(
-        [f"{row['name']} ({row['short_code']})" for _, row in active_zones.iterrows()],
-        active_zones['short_code']
-    ))
+    # Group zones by region
+    grouped_zones = group_zones_by_region(active_zones)
     
-    # Country selection
+    # Region selection
+    selected_region = st.sidebar.selectbox(
+        "Select Region",
+        options=list(grouped_zones.keys())
+    )
+    
+    # Zone selection within region
     selected_zone_name = st.sidebar.selectbox(
         "Select Market Zone",
-        options=list(zone_mapping.keys()),
-        index=0 if zone_mapping else None
+        options=list(grouped_zones[selected_region].keys()) if selected_region else []
     )
     
     if selected_zone_name:
-        country_code = zone_mapping[selected_zone_name]
+        country_code = grouped_zones[selected_region][selected_zone_name]
         
         try:
             # Load data
