@@ -1,3 +1,14 @@
+"""
+This script fetches data from the ENTSO-E Transparency Platform API (https://transparency.entsoe.eu/).
+The following data is fetched for each bidding zone:
+1. Day-ahead electricity prices
+2. Load forecasts
+3. Wind and solar generation forecasts
+
+Required environment variables:
+- ENTSOE_API_KEY: Your API key from the ENTSO-E Transparency Platform
+"""
+
 from entsoe import EntsoePandasClient
 from dotenv import load_dotenv
 import os
@@ -16,238 +27,191 @@ logger = logging.getLogger(__name__)
 # Load environment variables
 load_dotenv()
 
-def retry_api_call(func, max_retries=5, retry_delay=10):
-    """Retry API calls with exponential backoff"""
+def retry_api_call(func, max_retries=3, retry_delay=5):
+    """Retry API calls with exponential backoff, max 3 attempts"""
     for attempt in range(max_retries):
         try:
             return func()
         except Exception as e:
             if attempt == max_retries - 1:
-                raise
+                logger.error(f"Failed after {max_retries} attempts, moving on...")
+                return None
             wait_time = retry_delay * (2 ** attempt)
-            logger.warning(f"API call failed, retrying in {wait_time} seconds... Error: {str(e)}")
+            logger.warning(f"API call failed (attempt {attempt + 1}/{max_retries}), retrying in {wait_time} seconds... Error: {str(e)}")
             time.sleep(wait_time)
 
 def fetch_historical_prices(client, country_code, start_date, end_date):
-    """Fetch day-ahead electricity prices"""
+    """Fetch day-ahead electricity prices from ENTSO-E"""
     try:
         def _fetch():
-            return client.query_day_ahead_prices(
-                country_code,
-                start=start_date,
-                end=end_date
-            )
+            return client.query_day_ahead_prices(country_code, start=start_date, end=end_date)
         return retry_api_call(_fetch)
     except Exception as e:
         logger.error(f"Error fetching day-ahead prices: {str(e)}")
         return None
 
-def fetch_actual_generation(client, country_code, start_date, end_date):
-    """Fetch actual power generation data"""
-    try:
-        def _fetch():
-            return client.query_generation(
-                country_code,
-                start=start_date,
-                end=end_date,
-                psr_type=None
-            )
-        return retry_api_call(_fetch)
-    except Exception as e:
-        logger.error(f"Error fetching generation data: {str(e)}")
-        return None
-
-def fetch_wind_solar_forecast(client, country_code, start_date, end_date):
-    """Fetch wind and solar generation forecasts"""
-    try:
-        def _fetch():
-            return client.query_wind_and_solar_forecast(
-                country_code,
-                start=start_date,
-                end=end_date
-            )
-        return retry_api_call(_fetch)
-    except Exception as e:
-        logger.error(f"Error fetching wind/solar forecast: {str(e)}")
-        return None
-
 def fetch_load_forecast(client, country_code, start_date, end_date):
-    """Fetch day-ahead load forecast"""
+    """Fetch day-ahead load forecasts from ENTSO-E"""
     try:
         def _fetch():
-            return client.query_load_forecast(
-                country_code,
-                start=start_date,
-                end=end_date,
-                process_type="A01"
-            )
+            return client.query_load_forecast(country_code, start=start_date, end=end_date, process_type="A01")
         return retry_api_call(_fetch)
     except Exception as e:
         logger.error(f"Error fetching load forecast: {str(e)}")
         return None
 
-def process_and_save_data(raw_data, processed_data_dir, country_code):
-    """Process raw data and save to processed directory"""
+def fetch_wind_solar_forecast(client, country_code, start_date, end_date):
+    """Fetch wind and solar generation forecasts from ENTSO-E"""
+    try:
+        def _fetch():
+            return client.query_wind_and_solar_forecast(country_code, start=start_date, end=end_date)
+        return retry_api_call(_fetch)
+    except Exception as e:
+        logger.error(f"Error fetching wind/solar forecast: {str(e)}")
+        return None
+
+def fetch_data_for_country(client, country_code, start_date, end_date):
+    """Fetch all required data for a country"""
+    logger.info(f"Fetching data for {country_code} from {start_date} to {end_date}")
+    
+    # Fetch all data types
+    prices = fetch_historical_prices(client, country_code, start_date, end_date)
+    load = fetch_load_forecast(client, country_code, start_date, end_date)
+    forecast = fetch_wind_solar_forecast(client, country_code, start_date, end_date)
+    
+    return {
+        'prices': prices,
+        'load': load,
+        'forecast': forecast
+    }
+
+def process_and_save_data(raw_data, country_code, project_root):
+    """Process and save data for a country"""
     try:
         # Extract data
         prices = raw_data['prices']
-        generation = raw_data['generation']
-        forecast = raw_data['forecast']
         load = raw_data['load']
+        forecast = raw_data['forecast']
         
-        # Process generation data
-        if isinstance(generation, pd.DataFrame):
-            wind = generation.get('Wind Onshore', 0) + generation.get('Wind Offshore', 0)
-            solar = generation.get('Solar', 0)
+        # Create base dataframe with prices
+        df = pd.DataFrame(index=prices.index)
+        df['price'] = prices
+        
+        # Add load forecast
+        df['load_forecast'] = load.reindex(df.index)
+        
+        # Add wind and solar forecasts
+        if 'Wind Offshore' in forecast.columns:
+            df['wind_offshore'] = forecast['Wind Offshore'].reindex(df.index)
         else:
-            wind = pd.Series(0, index=prices.index)
-            solar = pd.Series(0, index=prices.index)
-        
-        # Process forecast data
-        wind_forecast = forecast.get('Wind Onshore', 0) + forecast.get('Wind Offshore', 0)
-        solar_forecast = forecast.get('Solar', 0)
-        
-        # Combine all data
-        data = pd.DataFrame({
-            'price': prices,
-            'load': load,
-            'wind': wind,
-            'solar': solar,
-            'wind_forecast': wind_forecast,
-            'solar_forecast': solar_forecast
-        })
-        
-        # Add derived features
-        data['total_wind'] = data['wind']
-        data['renewable_ratio'] = (data['wind'] + data['solar']) / data['load']
-        data['hour'] = data.index.hour
-        data['day_of_week'] = data.index.dayofweek
-        data['month'] = data.index.month
-        data['weekend'] = data.index.dayofweek.isin([5, 6]).astype(int)
-        
-        # Add cyclical features
-        data['hour_sin'] = np.sin(2 * np.pi * data['hour']/24)
-        data['hour_cos'] = np.cos(2 * np.pi * data['hour']/24)
-        data['month_sin'] = np.sin(2 * np.pi * data['month']/12)
-        data['month_cos'] = np.cos(2 * np.pi * data['month']/12)
-        
-        # Save processed data
-        processed_file = processed_data_dir / f'processed_data_{country_code}.csv'
-        if processed_file.exists():
-            # If file exists, append new data
-            existing_data = pd.read_csv(processed_file, index_col=0, parse_dates=True)
-            combined_data = pd.concat([existing_data, data])
-            combined_data = combined_data[~combined_data.index.duplicated(keep='last')]
-            combined_data.sort_index(inplace=True)
-            combined_data.to_csv(processed_file)
-            logger.info(f"Updated processed data for {country_code}")
-            logger.info(f"Data range: {combined_data.index[0]} to {combined_data.index[-1]}")
+            df['wind_offshore'] = 0
+            
+        if 'Wind Onshore' in forecast.columns:
+            df['wind_onshore'] = forecast['Wind Onshore'].reindex(df.index)
         else:
-            # If file doesn't exist, create new
-            data.to_csv(processed_file)
-            logger.info(f"Created new processed data file for {country_code}")
+            df['wind_onshore'] = 0
+            
+        if 'Solar' in forecast.columns:
+            df['solar'] = forecast['Solar'].reindex(df.index)
+        else:
+            df['solar'] = 0
+        
+        # Calculate total wind forecast
+        df['total_wind_forecast'] = df['wind_offshore'] + df['wind_onshore']
+        
+        # Calculate renewable ratio
+        total_generation = df['total_wind_forecast'] + df['solar']
+        df['renewable_ratio'] = total_generation / df['load_forecast']
+        
+        # Add time features
+        df['hour'] = df.index.hour
+        df['day_of_week'] = df.index.dayofweek
+        df['month'] = df.index.month
+        df['weekend'] = df.index.dayofweek.isin([5, 6]).astype(int)
+        
+        # Add cyclical time features
+        df['hour_sin'] = np.sin(2 * np.pi * df['hour'] / 24)
+        df['hour_cos'] = np.cos(2 * np.pi * df['hour'] / 24)
+        df['month_sin'] = np.sin(2 * np.pi * df['month'] / 12)
+        df['month_cos'] = np.cos(2 * np.pi * df['month'] / 12)
+        
+        # Add price lags
+        df['price_lag_24h'] = df['price'].shift(24)
+        df['price_lag_48h'] = df['price'].shift(48)
+        df['price_lag_168h'] = df['price'].shift(168)
+        
+        # Add rolling statistics
+        df['price_rolling_mean_24h'] = df['price'].rolling(window=24).mean()
+        df['price_rolling_std_24h'] = df['price'].rolling(window=24).std()
+        
+        # Save to CSV in project's data directory
+        output_file = project_root / 'data' / f'{country_code}.csv'
+        df.to_csv(output_file)
+        logger.info(f"Saved data to {output_file}")
+        
+        # If data is older than 30 days, move it to historical_data
+        latest_date = df.index.max()
+        if (pd.Timestamp.now(tz='UTC') - latest_date).days > 30:
+            historical_file = project_root / 'data' / 'historical_data' / f'{country_code}.csv'
+            df.to_csv(historical_file)
+            logger.info(f"Moved data to historical archive: {historical_file}")
         
         return True
+        
     except Exception as e:
-        logger.error(f"Error processing data for {country_code}: {str(e)}")
+        logger.error(f"Error processing data: {str(e)}")
         return False
-
-def fetch_data_for_country(client, country_code, start_date, end_date, chunk_size=timedelta(days=30)):
-    """Fetch data for a country in chunks to handle API limits"""
-    logger.info(f"Fetching data for {country_code} from {start_date} to {end_date}")
-    
-    current_start = start_date
-    raw_data = {
-        'prices': [],
-        'generation': [],
-        'forecast': [],
-        'load': []
-    }
-    
-    while current_start < end_date:
-        current_end = min(current_start + chunk_size, end_date)
-        logger.info(f"Fetching chunk: {current_start} to {current_end}")
-        
-        # Fetch all data types
-        prices = fetch_historical_prices(client, country_code, current_start, current_end)
-        generation = fetch_actual_generation(client, country_code, current_start, current_end)
-        forecast = fetch_wind_solar_forecast(client, country_code, current_start, current_end)
-        load = fetch_load_forecast(client, country_code, current_start, current_end)
-        
-        # Append non-None results
-        if prices is not None:
-            raw_data['prices'].append(prices)
-        if generation is not None:
-            raw_data['generation'].append(generation)
-        if forecast is not None:
-            raw_data['forecast'].append(forecast)
-        if load is not None:
-            raw_data['load'].append(load)
-        
-        current_start = current_end
-    
-    # Combine chunks
-    return {
-        'prices': pd.concat(raw_data['prices']) if raw_data['prices'] else None,
-        'generation': pd.concat(raw_data['generation']) if raw_data['generation'] else None,
-        'forecast': pd.concat(raw_data['forecast']) if raw_data['forecast'] else None,
-        'load': pd.concat(raw_data['load']) if raw_data['load'] else None
-    }
 
 def main():
     # Initialize API client
     client = EntsoePandasClient(api_key=os.getenv('ENTSOE_API_KEY'))
     
-    # Set up directories
-    raw_data_dir = Path('data/raw')
-    processed_data_dir = Path('data/processed')
-    raw_data_dir.mkdir(parents=True, exist_ok=True)
-    processed_data_dir.mkdir(parents=True, exist_ok=True)
+    # Get project root directory (2 levels up from this script)
+    project_root = Path(__file__).parents[2]
     
-    # Define countries
-    country_codes = [
-        'DE_LU',  # Germany-Luxembourg
-        'FR',     # France
-        'ES',     # Spain
-        'NL'      # Netherlands
-    ]
+    # Create historical_data directory if it doesn't exist
+    (project_root / 'data' / 'historical_data').mkdir(parents=True, exist_ok=True)
     
-    # Get current time in Brussels timezone
-    brussels_tz = pytz.timezone('Europe/Brussels')
-    now = pd.Timestamp.now(tz=brussels_tz)
+    # Read available bidding zones from CSV
+    bidding_zones_df = pd.read_csv(project_root / 'data' / 'available_bidding_zones.csv')
+    # Filter for active zones only
+    active_zones = bidding_zones_df[bidding_zones_df['active'] == 1]
+    logger.info(f"Loaded {len(active_zones)} active bidding zones from CSV")
     
-    for country_code in country_codes:
+    # Get current time in UTC and set to previous 703 days
+    now = pd.Timestamp.now(tz='UTC')
+    end_date = now.normalize()  # Set to midnight
+    start_date = end_date - timedelta(days=703)
+    
+    # Get list of already processed countries
+    existing_files = set(f.stem for f in (project_root / 'data').glob('*.csv') 
+                        if f.stem != 'available_bidding_zones')
+    logger.info(f"Found existing data for: {', '.join(sorted(existing_files))}")
+    
+    for _, row in active_zones.iterrows():
+        country_code = row['code']
+        short_code = row['short_code']
+            
         try:
-            # Check if processed file exists
-            processed_file = processed_data_dir / f'processed_data_{country_code}.csv'
-            if processed_file.exists():
-                # If file exists, only fetch missing data
-                existing_data = pd.read_csv(processed_file, index_col=0, parse_dates=True)
-                start_date = existing_data.index[-1] - timedelta(hours=1)  # Small overlap to ensure no gaps
-                end_date = now
-                logger.info(f"Updating existing data for {country_code} from {start_date}")
-            else:
-                # If file doesn't exist, fetch 2 years of historical data
-                end_date = now
-                start_date = end_date - timedelta(days=730)
-                logger.info(f"Fetching historical data for {country_code}")
+            logger.info(f"Processing {short_code} ({country_code})")
             
             # Fetch data
             raw_data = fetch_data_for_country(client, country_code, start_date, end_date)
             
             # Process and save data
             if all(v is not None for v in raw_data.values()):
-                success = process_and_save_data(raw_data, processed_data_dir, country_code)
+                success = process_and_save_data(raw_data, short_code, project_root)
                 if success:
-                    logger.info(f"Successfully processed data for {country_code}")
-                else:
-                    logger.error(f"Failed to process data for {country_code}")
+                    logger.info(f"Successfully processed data for {short_code}")
             else:
-                logger.error(f"Missing data for {country_code}")
+                logger.error(f"Missing data for {short_code}")
                 
         except Exception as e:
-            logger.error(f"Error processing {country_code}: {str(e)}")
+            logger.error(f"Error processing {short_code}: {str(e)}")
             continue
+            
+        # Add a small delay between countries to avoid rate limiting
+        time.sleep(2)
 
 if __name__ == "__main__":
     main()

@@ -11,9 +11,10 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 class PricePredictor:
-    def __init__(self, models_dir='models', processed_data_dir='data/processed', results_dir='results'):
+    def __init__(self, models_dir='models', data_dir='data', historical_data_dir='data/historical_data', results_dir='results'):
         self.models_dir = Path(models_dir)
-        self.processed_data_dir = Path(processed_data_dir)
+        self.data_dir = Path(data_dir)
+        self.historical_data_dir = Path(historical_data_dir)
         self.results_dir = Path(results_dir)
         self.results_dir.mkdir(parents=True, exist_ok=True)
         
@@ -38,14 +39,23 @@ class PricePredictor:
     
     def evaluate_predictions(self, y_true, y_pred):
         """Calculate various error metrics"""
+        # Remove any NaN values
+        mask = ~np.isnan(y_true) & ~np.isnan(y_pred)
+        y_true = y_true[mask]
+        y_pred = y_pred[mask]
+        
         metrics = {
             'MAE': mean_absolute_error(y_true, y_pred),
             'RMSE': np.sqrt(mean_squared_error(y_true, y_pred)),
             'R2': r2_score(y_true, y_pred)
         }
         
-        # Calculate MAPE
-        mape = np.mean(np.abs((y_true - y_pred) / y_true)) * 100
+        # Calculate MAPE avoiding division by zero
+        mask = y_true != 0
+        if np.any(mask):
+            mape = np.mean(np.abs((y_true[mask] - y_pred[mask]) / y_true[mask])) * 100
+        else:
+            mape = np.nan
         metrics['MAPE'] = mape
         
         return metrics
@@ -73,12 +83,34 @@ class PricePredictor:
             # Load model and scalers
             model, price_scaler, feature_scaler = self.load_model_and_scalers(country_code)
             
-            # Load data
-            data = pd.read_csv(
-                self.processed_data_dir / f'processed_data_{country_code}.csv',
-                index_col=0,
-                parse_dates=True
-            )
+            # Load current and historical data
+            data_frames = []
+            
+            # Load historical data if it exists
+            historical_file = self.historical_data_dir / f'{country_code}.csv'
+            if historical_file.exists():
+                historical_data = pd.read_csv(historical_file, index_col=0, parse_dates=True)
+                data_frames.append(historical_data)
+                logger.info(f"Loaded historical data from {historical_file}")
+            
+            # Load current data if it exists
+            current_file = self.data_dir / f'{country_code}.csv'
+            if current_file.exists():
+                current_data = pd.read_csv(current_file, index_col=0, parse_dates=True)
+                data_frames.append(current_data)
+                logger.info(f"Loaded current data from {current_file}")
+            
+            if not data_frames:
+                raise FileNotFoundError(f"No data found for {country_code}")
+            
+            # Combine and sort data
+            data = pd.concat(data_frames)
+            data = data.sort_index().drop_duplicates()
+            
+            # Handle missing or infinite values
+            data = data.replace([np.inf, -np.inf], np.nan)
+            data = data.dropna()
+            logger.info(f"Total data points after cleaning: {len(data)}")
             
             # Split data (same as in training)
             train_size = int(len(data) * 0.7)
@@ -97,11 +129,16 @@ class PricePredictor:
                 columns=['price'] + feature_columns
             )
             
+            # Verify no NaN values in scaled data
+            if test_data_scaled.isnull().any().any():
+                logger.error("Scaled data contains NaN values")
+                raise ValueError("Scaling produced NaN values")
+            
             # Create sequences
             X_test = self.create_sequences(test_data_scaled, self.sequence_length)
             
             # Make predictions
-            y_pred_scaled = model.predict(X_test)
+            y_pred_scaled = model.predict(X_test, verbose=0)  # Reduce verbosity
             
             # Inverse transform predictions
             y_pred = price_scaler.inverse_transform(y_pred_scaled)
@@ -111,11 +148,14 @@ class PricePredictor:
             dates = test_data.index[self.sequence_length:]
             
             # Calculate metrics
-            metrics = self.evaluate_predictions(y_true, y_pred)
+            metrics = self.evaluate_predictions(y_true, y_pred.flatten())
             
             # Log metrics
             for metric_name, value in metrics.items():
-                logger.info(f"{metric_name}: {value:.4f}")
+                if np.isfinite(value):  # Only log finite values
+                    logger.info(f"{metric_name}: {value:.4f}")
+                else:
+                    logger.warning(f"{metric_name}: Invalid value")
             
             # Save metrics
             pd.DataFrame(metrics, index=[0]).to_csv(
@@ -133,7 +173,7 @@ class PricePredictor:
             logger.info(f"Saved predictions to {self.results_dir}/predictions_{country_code}.csv")
             
             # Plot results
-            self.plot_predictions(y_true, y_pred, dates, country_code)
+            self.plot_predictions(y_true, y_pred.flatten(), dates, country_code)
             
             return metrics, y_true, y_pred, dates
             
@@ -142,14 +182,36 @@ class PricePredictor:
             raise
 
 def main():
-    predictor = PricePredictor()
+    # Get project root directory (2 levels up from this script)
+    project_root = Path(__file__).parents[2]
     
-    # Evaluate models for all available countries
-    model_files = list(Path('models').glob('lstm_model_*.keras'))
-    countries = [f.stem.split('lstm_model_')[1] for f in model_files]
+    predictor = PricePredictor(
+        models_dir=project_root / 'models',
+        data_dir=project_root / 'data',
+        historical_data_dir=project_root / 'data/historical_data',
+        results_dir=project_root / 'results'
+    )
+    
+    # Read available bidding zones from CSV
+    bidding_zones_df = pd.read_csv(project_root / 'data' / 'available_bidding_zones.csv')
+    # Filter for active zones only
+    active_zones = bidding_zones_df[bidding_zones_df['active'] == 1]
+    logger.info(f"Found {len(active_zones)} active bidding zones")
+    
+    # Get list of trained models
+    existing_models = set(f.stem.replace('lstm_model_', '') 
+                         for f in (project_root / 'models').glob('lstm_model_*.keras'))
+    logger.info(f"Found trained models for: {', '.join(sorted(existing_models))}")
     
     results = {}
-    for country_code in countries:
+    for _, row in active_zones.iterrows():
+        country_code = row['short_code']  # Use short code for file names
+        
+        # Skip if no model exists
+        if country_code not in existing_models:
+            logger.warning(f"No trained model found for {country_code}, skipping evaluation")
+            continue
+            
         try:
             metrics, _, _, _ = predictor.predict_and_evaluate(country_code)
             results[country_code] = metrics

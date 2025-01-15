@@ -1,0 +1,45 @@
+code,short_code,name,timezone,active
+10YAT-APG------L,AT,"Austria, APG BZ / CA / MBA",Europe/Vienna,1
+10YBE----------2,BE,"Belgium, Elia BZ / CA / MBA",Europe/Brussels,1
+10YCA-BULGARIA-R,BG,"Bulgaria, ESO BZ / CA / MBA",Europe/Sofia,1
+10YHR-HEP------M,HR,"Croatia, HOPS BZ / CA / MBA",Europe/Zagreb,1
+10YCZ-CEPS-----N,CZ,"Czech Republic, CEPS BZ / CA/ MBA",Europe/Prague,1
+10Y1001A1001A82H,DE_LU,DE-LU BZ / MBA,Europe/Berlin,1
+10YDK-1--------W,DK_1,DK1 BZ / MBA,Europe/Copenhagen,1
+10YDK-2--------M,DK_2,DK2 BZ / MBA,Europe/Copenhagen,1
+10Y1001A1001A39I,EE,"Estonia, Elering BZ / CA / MBA",Europe/Tallinn,1
+10YFI-1--------U,FI,"Finland, Fingrid BZ / CA / MBA",Europe/Helsinki,1
+10YFR-RTE------C,FR,"France, RTE BZ / CA / MBA",Europe/Paris,1
+10YGR-HTSO-----Y,GR,"Greece, IPTO BZ / CA/ MBA",Europe/Athens,1
+10YHU-MAVIR----U,HU,"Hungary, MAVIR CA / BZ / MBA",Europe/Budapest,1
+10Y1001A1001A59C,IE_SEM,Ireland (SEM) BZ / MBA,Europe/Dublin,0
+10Y1001A1001A885,IT_SACO_AC,Italy_Saco_AC,Europe/Rome,0
+10Y1001C--00096J,IT_CALA,IT-Calabria BZ,Europe/Rome,1
+10Y1001A1001A893,IT_SACO_DC,Italy_Saco_DC,Europe/Rome,0
+10Y1001A1001A70O,IT_CNOR,IT-Centre-North BZ,Europe/Rome,1
+10Y1001A1001A71M,IT_CSUD,IT-Centre-South BZ,Europe/Rome,1
+10Y1001A1001A73I,IT_NORD,IT-North BZ,Europe/Rome,1
+10Y1001A1001A74G,IT_SARD,IT-Sardinia BZ,Europe/Rome,1
+10Y1001A1001A75E,IT_SICI,IT-Sicily BZ,Europe/Rome,1
+10Y1001A1001A788,IT_SUD,IT-South BZ,Europe/Rome,1
+10YLV-1001A00074,LV,"Latvia, AST BZ / CA / MBA",Europe/Riga,1
+10YLT-1001A0008Q,LT,"Lithuania, Litgrid BZ / CA / MBA",Europe/Vilnius,1
+10YCS-CG-TSO---S,ME,"Montenegro, CGES BZ / CA / MBA",Europe/Podgorica,1
+10YNL----------L,NL,"Netherlands, TenneT NL BZ / CA/ MBA",Europe/Amsterdam,1
+10YNO-1--------2,NO_1,NO1 BZ / MBA,Europe/Oslo,1
+10YNO-2--------T,NO_2,NO2 BZ / MBA,Europe/Oslo,1
+50Y0JVU59B4JWQCU,NO_2_NSL,NO2 NSL BZ / MBA,Europe/Oslo,0
+10YNO-3--------J,NO_3,NO3 BZ / MBA,Europe/Oslo,1
+10YNO-4--------9,NO_4,NO4 BZ / MBA,Europe/Oslo,1
+10Y1001A1001A48H,NO_5,NO5 BZ / MBA,Europe/Oslo,1
+10YPL-AREA-----S,PL,"Poland, PSE SA BZ / BZA / CA / MBA",Europe/Warsaw,1
+10YPT-REN------W,PT,"Portugal, REN BZ / CA / MBA",Europe/Lisbon,1
+10YRO-TEL------P,RO,"Romania, Transelectrica BZ / CA/ MBA",Europe/Bucharest,1
+10Y1001A1001A44P,SE_1,SE1 BZ / MBA,Europe/Stockholm,1
+10Y1001A1001A47J,SE_4,SE4 BZ / MBA,Europe/Stockholm,1
+10YCS-SERBIATSOV,RS,"Serbia, EMS BZ / CA / MBA",Europe/Belgrade,1
+10YSK-SEPS-----K,SK,"Slovakia, SEPS BZ / CA / MBA",Europe/Bratislava,0
+10YSI-ELES-----O,SI,"Slovenia, ELES BZ / CA / MBA",Europe/Ljubljana,1
+10YES-REE------0,ES,"Spain, REE BZ / CA / MBA",Europe/Madrid,1
+10YCH-SWISSGRIDZ,CH,"Switzerland, Swissgrid BZ / CA / MBA",Europe/Zurich,1
+10Y1001C--000182,UA_IPS,Ukraine IPS CTA,Europe/Kiev,0

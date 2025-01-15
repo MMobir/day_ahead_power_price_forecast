@@ -9,8 +9,9 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 class PricePredictionModel:
-    def __init__(self, processed_data_dir='data/processed', models_dir='models'):
-        self.processed_data_dir = Path(processed_data_dir)
+    def __init__(self, data_dir='data', historical_data_dir='data/historical_data', models_dir='models'):
+        self.data_dir = Path(data_dir)
+        self.historical_data_dir = Path(historical_data_dir)
         self.models_dir = Path(models_dir)
         self.models_dir.mkdir(parents=True, exist_ok=True)
         
@@ -55,9 +56,46 @@ class PricePredictionModel:
         logger.info(f"Training model for {country_code}")
         
         try:
-            # Load preprocessed data
-            data_file = self.processed_data_dir / f'processed_data_{country_code}.csv'
-            data = pd.read_csv(data_file, index_col=0, parse_dates=True)
+            # Load current and historical data
+            current_file = self.data_dir / f'{country_code}.csv'
+            historical_file = self.historical_data_dir / f'{country_code}.csv'
+            
+            data_frames = []
+            
+            # Load historical data if it exists
+            if historical_file.exists():
+                historical_data = pd.read_csv(historical_file, index_col=0, parse_dates=True)
+                data_frames.append(historical_data)
+                logger.info(f"Loaded historical data from {historical_file}")
+            
+            # Load current data if it exists
+            if current_file.exists():
+                current_data = pd.read_csv(current_file, index_col=0, parse_dates=True)
+                data_frames.append(current_data)
+                logger.info(f"Loaded current data from {current_file}")
+            
+            if not data_frames:
+                raise FileNotFoundError(f"No data found for {country_code}")
+            
+            # Combine and sort data
+            data = pd.concat(data_frames)
+            data = data.sort_index().drop_duplicates()
+            
+            # Handle missing or infinite values
+            data = data.replace([np.inf, -np.inf], np.nan)
+            data = data.dropna()
+            logger.info(f"Total data points after cleaning: {len(data)}")
+            
+            # Check for remaining issues
+            if data.isnull().any().any():
+                logger.error("Data still contains NaN values after cleaning")
+                raise ValueError("Data contains NaN values")
+            
+            if (data['price'] <= 0).any():
+                logger.warning("Data contains non-positive prices, adding offset")
+                min_price = data['price'].min()
+                if min_price <= 0:
+                    data['price'] = data['price'] - min_price + 1  # Ensure all prices are positive
             
             # Split data into train/val/test (70/15/15)
             train_size = int(len(data) * 0.7)
@@ -79,20 +117,53 @@ class PricePredictionModel:
             val_data_scaled = self.transform_data(val_data)
             test_data_scaled = self.transform_data(test_data)
             
+            # Verify scaled data
+            if train_data_scaled.isnull().any().any():
+                logger.error("Scaled data contains NaN values")
+                raise ValueError("Scaling produced NaN values")
+            
             # Create sequences
             X_train, y_train = self.create_sequences(train_data_scaled, self.sequence_length)
             X_val, y_val = self.create_sequences(val_data_scaled, self.sequence_length)
             X_test, y_test = self.create_sequences(test_data_scaled, self.sequence_length)
             
-            # Build and train model
-            model = self.build_model(input_shape=(self.sequence_length, X_train.shape[2]))
+            # Build model with Input layer explicitly defined
+            input_shape = (self.sequence_length, X_train.shape[2])
+            model = tf.keras.Sequential([
+                tf.keras.layers.Input(shape=input_shape),
+                tf.keras.layers.LSTM(64, return_sequences=True),
+                tf.keras.layers.BatchNormalization(),
+                tf.keras.layers.Dropout(0.2),
+                tf.keras.layers.LSTM(32),
+                tf.keras.layers.BatchNormalization(),
+                tf.keras.layers.Dropout(0.2),
+                tf.keras.layers.Dense(16, activation='relu'),
+                tf.keras.layers.Dense(1)
+            ])
             
-            # Add early stopping
-            early_stopping = tf.keras.callbacks.EarlyStopping(
-                monitor='val_loss',
-                patience=5,
-                restore_best_weights=True
+            # Use gradient clipping to prevent exploding gradients
+            optimizer = tf.keras.optimizers.Adam(clipnorm=1.0)
+            
+            model.compile(
+                optimizer=optimizer,
+                loss='mse',
+                metrics=['mae']
             )
+            
+            # Add early stopping and reduce learning rate on plateau
+            callbacks = [
+                tf.keras.callbacks.EarlyStopping(
+                    monitor='val_loss',
+                    patience=5,
+                    restore_best_weights=True
+                ),
+                tf.keras.callbacks.ReduceLROnPlateau(
+                    monitor='val_loss',
+                    factor=0.5,
+                    patience=3,
+                    min_lr=1e-6
+                )
+            ]
             
             # Train model
             history = model.fit(
@@ -100,16 +171,15 @@ class PricePredictionModel:
                 validation_data=(X_val, y_val),
                 epochs=self.epochs,
                 batch_size=self.batch_size,
-                callbacks=[early_stopping],
+                callbacks=callbacks,
                 verbose=1
             )
             
-            # Save model with .keras extension (new format)
+            # Save model and scalers
             model_path = self.models_dir / f'lstm_model_{country_code}.keras'
             model.save(model_path)
             logger.info(f"Model saved to {model_path}")
             
-            # Also save the scalers for later use
             scaler_path = self.models_dir / f'scalers_{country_code}.pkl'
             import joblib
             joblib.dump({
@@ -146,14 +216,35 @@ class PricePredictionModel:
         return scaled_data
 
 def main():
-    model_trainer = PricePredictionModel()
+    # Get project root directory (2 levels up from this script)
+    project_root = Path(__file__).parents[2]
     
-    # Train models for all available countries
-    data_files = list(Path('data/processed').glob('processed_data_*.csv'))
-    countries = [f.stem.split('processed_data_')[1] for f in data_files]
+    model_trainer = PricePredictionModel(
+        data_dir=project_root / 'data',
+        historical_data_dir=project_root / 'data/historical_data',
+        models_dir=project_root / 'models'
+    )
     
-    for country_code in countries:
+    # Read available bidding zones from CSV
+    bidding_zones_df = pd.read_csv(project_root / 'data' / 'available_bidding_zones.csv')
+    # Filter for active zones only
+    active_zones = bidding_zones_df[bidding_zones_df['active'] == 1]
+    logger.info(f"Found {len(active_zones)} active bidding zones")
+    
+    # Get list of existing models
+    existing_models = set(f.stem.replace('lstm_model_', '') 
+                         for f in (project_root / 'models').glob('lstm_model_*.keras'))
+    logger.info(f"Found existing models for: {', '.join(sorted(existing_models))}")
+    
+    # Train models for all active zones
+    for _, row in active_zones.iterrows():
+        country_code = row['short_code']  # Use short code for file names
         try:
+            # Check if model already exists
+            if country_code in existing_models:
+                logger.info(f"Model already exists for {country_code}, skipping training")
+                continue
+                
             model, history = model_trainer.train_model(country_code)
             logger.info(f"Successfully trained model for {country_code}")
         except Exception as e:
